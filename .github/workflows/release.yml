@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            artifact: tts-mcp_linux_amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            artifact: tts-mcp_darwin_arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            artifact: tts-mcp_windows_amd64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install ALSA headers (Linux)
+        if: matrix.goos == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Build
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+          go build -ldflags="-s -w" -o "tts-mcp${EXT}" ./cmd/server/
+
+      - name: Package (Unix)
+        if: matrix.goos != 'windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp tts-mcp README.md LICENSE dist/
+          cd dist && zip "../${{ matrix.artifact }}.zip" *
+
+      - name: Package (Windows)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item tts-mcp.exe, README.md, LICENSE -Destination dist
+          Compress-Archive -Path dist/* -DestinationPath "${{ matrix.artifact }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/*.zip

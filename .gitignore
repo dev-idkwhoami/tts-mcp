@@ -1,0 +1,10 @@
+*.exe
+build/
+dist/
+.xai
+.openai
+.env
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
